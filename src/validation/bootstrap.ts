@@ -78,6 +78,12 @@ export function bootstrapGlasso(
   const bootStorage: Float64Array[] = Array.from({ length: edgeCount }, () => new Float64Array(iter));
   const sample: number[][] = Array.from({ length: n }, () => new Array<number>(p).fill(0));
 
+  // For GLASSO with auto lambda (rho=0): fix the lambda selected on the
+  // original data for all bootstrap iterations. This avoids re-running the
+  // 100-lambda EBIC path search each iteration (~100x speedup).
+  // Standard approach matching R bootnet.
+  const bootRho = (method === 'glasso' && rho === 0 && origLambda) ? origLambda : rho;
+
   for (let b = 0; b < iter; b++) {
     for (let i = 0; i < n; i++) {
       const src = rng.randInt(n);
@@ -86,7 +92,7 @@ export function bootstrapGlasso(
       for (let jj = 0; jj < p; jj++) dstRow[jj] = srcRow[jj]!;
     }
 
-    const { pcor: bootPcor } = estimatePcor(sample, method, gamma, rho, true);
+    const { pcor: bootPcor } = estimatePcor(sample, method, gamma, bootRho, true);
 
     for (let k = 0; k < edgeCount; k++) {
       bootStorage[k]![b] = bootPcor[edgeIs[k]!]![edgeJs[k]!]!;
