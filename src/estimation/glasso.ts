@@ -3,60 +3,77 @@
  * Friedman, Hastie & Tibshirani (2008) — matches glasso::glasso() within 1e-5
  */
 
-function softThreshold(x: number, lambda: number): number {
-  if (x > lambda) return x - lambda;
-  if (x < -lambda) return x + lambda;
-  return 0;
-}
-
-export function runGlasso(
+/**
+ * Core GLASSO coordinate descent — returns W, Beta only (no Theta).
+ * Used internally by ebicGlasso path scan to avoid allocating Theta for every lambda.
+ */
+export function glassoCD(
   R: number[][],
   rho: number,
-  maxIterOuter = 100,
-  tolOuter = 1e-4,
-  maxIterInner = 200,
-  tolInner = 1e-6,
+  maxIterOuter: number,
+  tolOuter: number,
+  maxIterInner: number,
+  tolInner: number,
   initW?: number[][],
   initBeta?: number[][],
-): { Theta: number[][]; W: number[][]; Beta: number[][] } {
+  /** When true, mutate initW/initBeta in place (avoids copy). Caller must not reuse originals. */
+  inPlace = false,
+): { W: number[][]; Beta: number[][] } {
   const p = R.length;
+  const pp = p - 1;
 
   const W: number[][] = initW
-    ? initW.map(row => [...row])
+    ? (inPlace ? initW : initW.map(row => [...row]))
     : R.map(row => [...row]);
 
   const Beta: number[][] = initBeta
-    ? initBeta.map(row => [...row])
+    ? (inPlace ? initBeta : initBeta.map(row => [...row]))
     : Array.from({ length: p }, () => new Array(p).fill(0));
+
+  // Pre-allocate work buffers
+  const W11 = new Float64Array(pp * pp);
+  const s12 = new Float64Array(pp);
+  const beta = new Float64Array(pp);
+  const w12 = new Float64Array(pp);
 
   for (let iter = 0; iter < maxIterOuter; iter++) {
     let maxDiff = 0;
 
     for (let j = 0; j < p; j++) {
-      const W11: number[][] = [];
-      const s12: number[] = [];
+      // Fill W11, s12
+      let ri = 0;
       for (let a = 0; a < p; a++) {
         if (a === j) continue;
-        const row: number[] = [];
+        let ci = 0;
         for (let b = 0; b < p; b++) {
-          if (b !== j) row.push(W[a]![b]!);
+          if (b !== j) { W11[ri * pp + ci] = W[a]![b]!; ci++; }
         }
-        W11.push(row);
-        s12.push(R[a]![j]!);
+        s12[ri] = R[a]![j]!;
+        ri++;
       }
 
-      const pp = p - 1;
-      const beta = Beta[j]!.filter((_, k) => k !== j);
+      // Fill beta
+      let bi = 0;
+      for (let k = 0; k < p; k++) {
+        if (k !== j) { beta[bi] = Beta[j]![k]!; bi++; }
+      }
 
+      // Coordinate descent
       for (let innerIter = 0; innerIter < maxIterInner; innerIter++) {
         let maxBetaDiff = 0;
         for (let k = 0; k < pp; k++) {
           let partial = s12[k]!;
           for (let l = 0; l < pp; l++) {
-            if (l !== k) partial -= W11[k]![l]! * beta[l]!;
+            if (l !== k) partial -= W11[k * pp + l]! * beta[l]!;
           }
-          const wkk = W11[k]![k]!;
-          const newBeta = wkk < 1e-12 ? 0 : softThreshold(partial, rho) / wkk;
+          const wkk = W11[k * pp + k]!;
+          let newBeta: number;
+          if (wkk < 1e-12) {
+            newBeta = 0;
+          } else {
+            const st = partial > rho ? partial - rho : partial < -rho ? partial + rho : 0;
+            newBeta = st / wkk;
+          }
           const diff = Math.abs(newBeta - beta[k]!);
           if (diff > maxBetaDiff) maxBetaDiff = diff;
           beta[k] = newBeta;
@@ -64,11 +81,14 @@ export function runGlasso(
         if (maxBetaDiff < tolInner) break;
       }
 
-      const w12 = new Array<number>(pp).fill(0);
+      // w12 = W11 @ beta
       for (let a = 0; a < pp; a++) {
-        for (let k = 0; k < pp; k++) w12[a]! += W11[a]![k]! * beta[k]!;
+        let sum = 0;
+        for (let k = 0; k < pp; k++) sum += W11[a * pp + k]! * beta[k]!;
+        w12[a] = sum;
       }
 
+      // Update W and Beta
       let betaIdx = 0;
       for (let a = 0; a < p; a++) {
         if (a === j) continue;
@@ -86,6 +106,14 @@ export function runGlasso(
     if (maxDiff < tolOuter) break;
   }
 
+  return { W, Beta };
+}
+
+/**
+ * Build Theta (precision matrix) from converged W and Beta.
+ */
+export function buildTheta(W: number[][], Beta: number[][]): number[][] {
+  const p = W.length;
   const Theta: number[][] = Array.from({ length: p }, () => new Array(p).fill(0));
   for (let j = 0; j < p; j++) {
     const wjj = W[j]![j]!;
@@ -101,7 +129,7 @@ export function runGlasso(
       }
     }
   }
-
+  // Symmetrize
   for (let i = 0; i < p; i++) {
     for (let j = i + 1; j < p; j++) {
       const avg = (Theta[i]![j]! + Theta[j]![i]!) / 2;
@@ -109,6 +137,24 @@ export function runGlasso(
       Theta[j]![i] = avg;
     }
   }
+  return Theta;
+}
 
+/**
+ * Full GLASSO: coordinate descent + Theta construction.
+ * Public API — unchanged signature.
+ */
+export function runGlasso(
+  R: number[][],
+  rho: number,
+  maxIterOuter = 100,
+  tolOuter = 1e-4,
+  maxIterInner = 200,
+  tolInner = 1e-6,
+  initW?: number[][],
+  initBeta?: number[][],
+): { Theta: number[][]; W: number[][]; Beta: number[][] } {
+  const { W, Beta } = glassoCD(R, rho, maxIterOuter, tolOuter, maxIterInner, tolInner, initW, initBeta);
+  const Theta = buildTheta(W, Beta);
   return { Theta, W, Beta };
 }
