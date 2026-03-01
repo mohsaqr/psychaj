@@ -107,10 +107,6 @@ export function ebicGlasso(
   let prevW: number[][] | undefined;
   let prevBeta: number[][] | undefined;
 
-  // Early stopping: once EBIC increases for 10+ consecutive lambdas past
-  // the minimum, the U-shaped curve won't come back down. Safe to stop.
-  let consecutiveIncreases = 0;
-
   for (const lam of lambdas) {
     // Use glassoCD with inPlace=true — avoids copying W/Beta each lambda.
     // The path feeds each result as warm-start to the next, so mutation is safe.
@@ -126,10 +122,6 @@ export function ebicGlasso(
       // Must copy since in-place mode mutates W/Beta on next lambda
       bestW = W.map(row => [...row]);
       bestBeta = Beta.map(row => [...row]);
-      consecutiveIncreases = 0;
-    } else {
-      consecutiveIncreases++;
-      if (consecutiveIncreases >= 10) break;
     }
   }
 
