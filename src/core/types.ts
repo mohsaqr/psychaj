@@ -177,6 +177,11 @@ export interface BootstrapGlassoOptions {
   iter?: number;
   seed?: number;
   ciLevel?: number;
+  /**
+   * When true, fix the lambda selected on the original data for all
+   * bootstrap samples (faster, ~100x for GLASSO). When false (default),
+   * re-run EBIC path search per sample (matches R bootnet). */
+  fixLambda?: boolean;
 }
 
 export interface StabilityResult {
