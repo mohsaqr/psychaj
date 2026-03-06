@@ -128,10 +128,14 @@ export function fitMGM(
     selectedLambdas[s] = best.coefs.lambda;
 
     // Map coefficients back to original node indices
+    // For binary nodes, scale by 0.5 to match R mgm convention:
+    // mgm uses multinomial logistic for categorical variables, which
+    // halves the interaction parameters relative to binomial logistic.
+    const coefScale = nodeTypes[s] === 'binary' ? 0.5 : 1;
     let ci = 0;
     for (let j = 0; j < p; j++) {
       if (j !== s) {
-        asymWeights[s]![j] = best.coefs.beta[ci]!;
+        asymWeights[s]![j] = best.coefs.beta[ci]! * coefScale;
         ci++;
       }
     }
