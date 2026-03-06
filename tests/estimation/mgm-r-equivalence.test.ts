@@ -125,9 +125,8 @@ describe('MGM R equivalence — Dataset 1 (all-gaussian, n=300, p=4)', () => {
       }
     }
     console.log(`  shared edges compared: ${compared}, maxDiff: ${maxDiff.toFixed(4)}`);
-    // Tolerance is generous due to different glmnet internals
     if (compared > 0) {
-      expect(maxDiff).toBeLessThan(0.5);
+      expect(maxDiff).toBeLessThan(0.01);
     }
   });
 });
@@ -188,7 +187,7 @@ describe('MGM R equivalence — Dataset 2 (all-binary, n=400, p=4)', () => {
     }
     console.log(`  shared edges compared: ${compared}, maxDiff: ${maxDiff.toFixed(4)}`);
     if (compared > 0) {
-      expect(maxDiff).toBeLessThan(0.6);
+      expect(maxDiff).toBeLessThan(0.01);
     }
   });
 });

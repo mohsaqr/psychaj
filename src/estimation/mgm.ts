@@ -14,7 +14,7 @@
  * both node regressions and symmetrized via AND or OR rule.
  */
 
-import { glmnetPath, selectByEBIC } from 'carm/stats';
+import { glmnetPathFlat, selectByEBIC } from 'carm/stats';
 import type { GlmFamily } from 'carm/stats';
 import type { MgmNodeType, MgmOptions, MgmResult } from '../core/types';
 
@@ -68,31 +68,42 @@ export function fitMGM(
   }
 
   // ── Pre-process: scale gaussian nodes ──
-  // Make a working copy
-  const workData: number[][] = data.map(row => [...row]);
+  // Only copy data if we need to modify it (scaling gaussian columns)
+  const needsCopy = scale && nodeTypes.some(t => t === 'gaussian');
+  const dataFlat = new Float64Array(n * p);
+  if (needsCopy) {
+    const colMean = new Float64Array(p);
+    const colSd = new Float64Array(p);
+    colSd.fill(1);
 
-  const colMean = new Float64Array(p);
-  const colSd = new Float64Array(p);
-  colSd.fill(1);
-
-  if (scale) {
+    // Flatten + scale in one pass
+    for (let i = 0; i < n; i++) {
+      const row = data[i]!;
+      for (let j = 0; j < p; j++) dataFlat[i * p + j] = row[j]!;
+    }
     for (let j = 0; j < p; j++) {
       if (nodeTypes[j] !== 'gaussian') continue;
       let sum = 0;
-      for (let i = 0; i < n; i++) sum += workData[i]![j]!;
+      for (let i = 0; i < n; i++) sum += dataFlat[i * p + j]!;
       colMean[j] = sum / n;
 
       let ss = 0;
       for (let i = 0; i < n; i++) {
-        const d = workData[i]![j]! - colMean[j]!;
+        const d = dataFlat[i * p + j]! - colMean[j]!;
         ss += d * d;
       }
       const sd = Math.sqrt(ss / (n - 1));
       colSd[j] = sd > 1e-12 ? sd : 1;
 
       for (let i = 0; i < n; i++) {
-        workData[i]![j] = (workData[i]![j]! - colMean[j]!) / colSd[j]!;
+        dataFlat[i * p + j] = (dataFlat[i * p + j]! - colMean[j]!) / colSd[j]!;
       }
+    }
+  } else {
+    // No scaling needed — flatten original data directly
+    for (let i = 0; i < n; i++) {
+      const row = data[i]!;
+      for (let j = 0; j < p; j++) dataFlat[i * p + j] = row[j]!;
     }
   }
 
@@ -100,27 +111,26 @@ export function fitMGM(
   // asymWeights[s][t] = coefficient of node t in regression of node s
   const asymWeights: number[][] = Array.from({ length: p }, () => new Array(p).fill(0));
   const selectedLambdas: number[] = new Array(p).fill(0);
+  const pMinus1 = p - 1;
 
   for (let s = 0; s < p; s++) {
     const family = NODE_TYPE_TO_FAMILY[nodeTypes[s]!]!;
 
-    // y = column s, X = all other columns
-    const y: number[] = new Array(n);
-    const X: number[][] = new Array(n);
+    // Build flat sub-matrix: y = column s, X = all other columns
+    const Xflat = new Float64Array(n * pMinus1);
+    const yFlat = new Float64Array(n);
     for (let i = 0; i < n; i++) {
-      y[i] = workData[i]![s]!;
-      const row = new Array(p - 1);
+      yFlat[i] = dataFlat[i * p + s]!;
       let ci = 0;
       for (let j = 0; j < p; j++) {
-        if (j !== s) { row[ci] = workData[i]![j]!; ci++; }
+        if (j !== s) { Xflat[i * pMinus1 + ci] = dataFlat[i * p + j]!; ci++; }
       }
-      X[i] = row;
     }
 
-    const path = glmnetPath(X, y, {
+    const path = glmnetPathFlat(Xflat, yFlat, n, pMinus1, {
       family,
       nLambda,
-      standardize: false,  // We pre-scaled gaussian nodes; binary/poisson don't need it
+      standardize: true,  // match R's mgm which uses glmnet default standardize=TRUE
       intercept: true,
     });
 
@@ -164,9 +174,9 @@ export function fitMGM(
       weightMatrix[i]![j] = weight;
       weightMatrix[j]![i] = weight;
 
-      // Sign: for same-type continuous pairs, use sign of mean coefficient
-      // For mixed pairs or if weight is zero, sign is 0
-      if (weight > 1e-10) {
+      // Sign: only assigned for edges between non-categorical nodes (R's mgm convention).
+      // Edges involving binary (categorical) nodes get sign=0.
+      if (weight > 1e-10 && nodeTypes[i] !== 'binary' && nodeTypes[j] !== 'binary') {
         const meanCoef = (wij + wji) / 2;
         signMatrix[i]![j] = meanCoef > 0 ? 1 : meanCoef < 0 ? -1 : 0;
         signMatrix[j]![i] = signMatrix[i]![j]!;

@@ -88,19 +88,19 @@ describe('MGM extended — Dataset 4 (gaussian chain, p=5, n=500)', () => {
   it('structure matches R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(1);
+    expect(cmp.structMismatch).toBe(0);
   });
 
   it('weights close to R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.maxDiff).toBeLessThan(0.1);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 
   it('sign agreement', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const sa = signAgreement(ds.signMatrix, result.signMatrix, ds.weightMatrix, result.weightMatrix, ds.p);
-    if (sa.total > 0) expect(sa.agree / sa.total).toBeGreaterThanOrEqual(0.8);
+    if (sa.total > 0) expect(sa.agree / sa.total).toBe(1);
   });
 });
 
@@ -109,16 +109,16 @@ describe('MGM extended — Dataset 5 (binary chain, p=6, n=500)', () => {
   const data = toRows(ds.data, ds.labels);
   const types = ds.types.map(rType);
 
-  it('structure matches R (at most 2 disagreements)', () => {
+  it('structure matches R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(2);
+    expect(cmp.structMismatch).toBe(0);
   });
 
   it('weights close to R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.maxDiff).toBeLessThan(0.15);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 
@@ -127,19 +127,16 @@ describe('MGM extended — Dataset 6 (mixed 6-node, 2g+2c+2p, n=600)', () => {
   const data = toRows(ds.data, ds.labels);
   const types = ds.types.map(rType);
 
-  it('structure within ±3 edges', () => {
-    const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
-    const rE = edges(ds.weightMatrix);
-    const jsE = edges(result.weightMatrix);
-    expect(Math.abs(rE - jsE)).toBeLessThanOrEqual(3);
-  });
-
-  it('shared edges weights reasonable', () => {
+  it('structure matches R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    if (cmp.sharedEdges > 0) {
-      expect(cmp.maxDiff).toBeLessThan(0.3);
-    }
+    expect(cmp.structMismatch).toBe(0);
+  });
+
+  it('weights close to R', () => {
+    const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
+    const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 
@@ -151,19 +148,19 @@ describe('MGM extended — Dataset 7 (gaussian varied, p=4, n=400)', () => {
   it('structure matches R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(1);
+    expect(cmp.structMismatch).toBe(0);
   });
 
   it('weights close to R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.maxDiff).toBeLessThan(0.1);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 
   it('signs match R on shared edges', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const sa = signAgreement(ds.signMatrix, result.signMatrix, ds.weightMatrix, result.weightMatrix, ds.p);
-    if (sa.total > 0) expect(sa.agree / sa.total).toBeGreaterThanOrEqual(0.8);
+    if (sa.total > 0) expect(sa.agree / sa.total).toBe(1);
   });
 });
 
@@ -172,17 +169,16 @@ describe('MGM extended — Dataset 8 (large-n mixed, p=4, n=1000)', () => {
   const data = toRows(ds.data, ds.labels);
   const types = ds.types.map(rType);
 
-  it('structure within ±2 edges', () => {
+  it('structure matches R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
-    const rE = edges(ds.weightMatrix);
-    const jsE = edges(result.weightMatrix);
-    expect(Math.abs(rE - jsE)).toBeLessThanOrEqual(2);
+    const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
+    expect(cmp.structMismatch).toBe(0);
   });
 
   it('weights close to R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.maxDiff).toBeLessThan(0.2);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 
@@ -194,13 +190,13 @@ describe('MGM extended — Dataset 9 (all-poisson, p=4, n=400)', () => {
   it('structure matches R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(1);
+    expect(cmp.structMismatch).toBe(0);
   });
 
   it('weights close to R', () => {
     const result = fitMGM(data, ds.labels, types, { gamma: 0.25, rule: 'AND' });
     const cmp = compare(ds.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.maxDiff).toBeLessThan(0.15);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 

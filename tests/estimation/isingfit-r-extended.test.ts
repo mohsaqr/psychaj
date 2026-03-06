@@ -75,21 +75,21 @@ describe('IsingFit extended — Dataset 4 (dense, p=4, n=500)', () => {
   it('AND rule: structure and weight match', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareWeights(ds.and_rule!.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(1);
-    expect(cmp.maxDiff).toBeLessThan(0.3);
+    expect(cmp.structMismatch).toBe(0);
+    expect(cmp.maxDiff).toBeLessThan(0.02);
   });
 
   it('OR rule: structure and weight match', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'OR' });
     const cmp = compareWeights(ds.or_rule!.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(1);
-    expect(cmp.maxDiff).toBeLessThan(0.3);
+    expect(cmp.structMismatch).toBe(0);
+    expect(cmp.maxDiff).toBeLessThan(0.02);
   });
 
   it('thresholds close to R', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareThresholds(ds.and_rule!.thresholds, result.thresholds);
-    expect(cmp.maxDiff).toBeLessThan(0.5);
+    expect(cmp.maxDiff).toBeLessThan(0.05);
   });
 });
 
@@ -100,14 +100,14 @@ describe('IsingFit extended — Dataset 5 (large chain, p=8, n=500)', () => {
   it('structure and weight match', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareWeights(ds.and_rule!.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(2);
-    expect(cmp.maxDiff).toBeLessThan(0.3);
+    expect(cmp.structMismatch).toBe(0);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 
   it('thresholds close to R', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareThresholds(ds.and_rule!.thresholds, result.thresholds);
-    expect(cmp.maxDiff).toBeLessThan(0.5);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 
@@ -118,8 +118,8 @@ describe('IsingFit extended — Dataset 6 (two clusters, p=6, n=400)', () => {
   it('structure and weight match', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareWeights(ds.and_rule!.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(2);
-    expect(cmp.maxDiff).toBeLessThan(0.3);
+    expect(cmp.structMismatch).toBe(0);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 
@@ -130,15 +130,14 @@ describe('IsingFit extended — Dataset 7 (unbalanced prevalence, p=5, n=300)', 
   it('structure and weight match', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareWeights(ds.and_rule!.weightMatrix, result.weightMatrix, ds.p);
-    // Unbalanced prevalence with small n=300 → borderline edges may differ
-    expect(cmp.structMismatch).toBeLessThanOrEqual(1);
-    expect(cmp.maxDiff).toBeLessThan(0.5);
+    expect(cmp.structMismatch).toBe(0);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 
   it('thresholds close to R', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareThresholds(ds.and_rule!.thresholds, result.thresholds);
-    expect(cmp.maxDiff).toBeLessThan(0.5);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 
@@ -149,14 +148,14 @@ describe('IsingFit extended — Dataset 8 (large n=1000, p=5)', () => {
   it('structure and weight match', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareWeights(ds.and_rule!.weightMatrix, result.weightMatrix, ds.p);
-    expect(cmp.structMismatch).toBeLessThanOrEqual(2);
-    expect(cmp.maxDiff).toBeLessThan(0.3);
+    expect(cmp.structMismatch).toBe(0);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 
   it('thresholds close to R', () => {
     const result = fitIsing(data, ds.labels, { gamma: 0.25, rule: 'AND' });
     const cmp = compareThresholds(ds.and_rule!.thresholds, result.thresholds);
-    expect(cmp.maxDiff).toBeLessThan(0.3);
+    expect(cmp.maxDiff).toBeLessThan(0.01);
   });
 });
 

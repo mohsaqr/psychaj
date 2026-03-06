@@ -9,7 +9,7 @@
  * is symmetrized via AND or OR rule.
  */
 
-import { glmnetPath, selectByEBIC } from 'carm/stats';
+import { glmnetPathFlat, selectByEBIC } from 'carm/stats';
 import type { IsingFitOptions, IsingFitResult } from '../core/types';
 
 /**
@@ -49,30 +49,36 @@ export function fitIsing(
     }
   }
 
+  // ── Pre-flatten data into Float64Array for efficient node-wise regression ──
+  const dataFlat = new Float64Array(n * p);
+  for (let i = 0; i < n; i++) {
+    const row = data[i]!;
+    for (let j = 0; j < p; j++) dataFlat[i * p + j] = row[j]!;
+  }
+
   // ── Node-wise regression ──
   // asymWeights[s][t] = coefficient of node t in regression of node s
   const asymWeights: number[][] = Array.from({ length: p }, () => new Array(p).fill(0));
   const thresholds: number[] = new Array(p).fill(0);
   const selectedLambdas: number[] = new Array(p).fill(0);
+  const pMinus1 = p - 1;
 
   for (let s = 0; s < p; s++) {
-    // y = column s, X = all other columns
-    const y: number[] = new Array(n);
-    const X: number[][] = new Array(n);
+    // Build flat sub-matrix: y = column s, X = all other columns
+    const Xflat = new Float64Array(n * pMinus1);
+    const yFlat = new Float64Array(n);
     for (let i = 0; i < n; i++) {
-      y[i] = data[i]![s]!;
-      const row = new Array(p - 1);
+      yFlat[i] = dataFlat[i * p + s]!;
       let ci = 0;
       for (let j = 0; j < p; j++) {
-        if (j !== s) { row[ci] = data[i]![j]!; ci++; }
+        if (j !== s) { Xflat[i * pMinus1 + ci] = dataFlat[i * p + j]!; ci++; }
       }
-      X[i] = row;
     }
 
-    const path = glmnetPath(X, y, {
+    const path = glmnetPathFlat(Xflat, yFlat, n, pMinus1, {
       family: 'binomial',
       nLambda,
-      standardize: false,  // binary predictors — no standardization needed
+      standardize: true,  // match R's IsingFit which uses glmnet default standardize=TRUE
       intercept: true,
     });
 

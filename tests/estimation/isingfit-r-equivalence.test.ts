@@ -6,9 +6,8 @@
  *
  * Tolerances:
  *   - Structure (which edges are nonzero): must match exactly
- *   - Edge weights: within 0.15 absolute (glmnet implementations differ
- *     in lambda path generation and CD convergence)
- *   - Thresholds: within 0.2 absolute
+ *   - Edge weights: within 0.02 absolute
+ *   - Thresholds: within 0.05 absolute
  */
 
 import { describe, it, expect } from 'vitest';
@@ -96,7 +95,7 @@ describe('IsingFit R equivalence — Dataset 1 (chain, n=300, p=5)', () => {
     expect(Math.abs(rEdges - jsEdges)).toBeLessThanOrEqual(2);
   });
 
-  it('shared edges have similar weights (within 0.15)', () => {
+  it('shared edges have similar weights (within 0.02)', () => {
     const p = ds.p;
     let maxDiff = 0;
     let comparedEdges = 0;
@@ -113,7 +112,7 @@ describe('IsingFit R equivalence — Dataset 1 (chain, n=300, p=5)', () => {
       }
     }
     if (comparedEdges > 0) {
-      expect(maxDiff).toBeLessThan(0.5);
+      expect(maxDiff).toBeLessThan(0.02);
     }
   });
 
