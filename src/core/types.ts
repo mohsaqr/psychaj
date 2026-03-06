@@ -234,3 +234,47 @@ export interface GraphMetrics {
   largestComponentSize: number;
   selfLoops: number;
 }
+
+// ═══════════════════════════════════════════════════════════
+//  IsingFit
+// ═══════════════════════════════════════════════════════════
+
+export interface IsingFitOptions {
+  gamma?: number;        // EBIC gamma, default 0.25
+  rule?: 'AND' | 'OR';  // symmetrization, default 'AND'
+  nLambda?: number;      // default 100
+}
+
+export interface IsingFitResult {
+  weightMatrix: number[][];  // p×p symmetric weighted adjacency
+  thresholds: number[];      // p intercepts
+  labels: string[];
+  gamma: number;
+  rule: 'AND' | 'OR';
+  lambdas: number[];         // selected lambda per node
+  nObs: number;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MGM (Mixed Graphical Models)
+// ═══════════════════════════════════════════════════════════
+
+export type MgmNodeType = 'gaussian' | 'binary' | 'poisson';
+
+export interface MgmOptions {
+  gamma?: number;        // default 0.25
+  rule?: 'AND' | 'OR';  // default 'AND'
+  nLambda?: number;      // default 100
+  scale?: boolean;       // standardize gaussian nodes, default true
+}
+
+export interface MgmResult {
+  weightMatrix: number[][];  // p×p weighted adjacency
+  signMatrix: number[][];    // p×p signs (+1/-1/0)
+  labels: string[];
+  nodeTypes: MgmNodeType[];
+  gamma: number;
+  rule: 'AND' | 'OR';
+  lambdas: number[];
+  nObs: number;
+}
