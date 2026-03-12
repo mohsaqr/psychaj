@@ -150,44 +150,12 @@ export function fitGraphicalVAR(
 
   for (const lb of lambdas_beta) {
     for (const lk of lambdas_kappa) {
-      const result = _rothmana(X, Y, lb, lk, d, penalizeDiagonal);
+      const result = _rothmana(X, Y, lb, lk, d, penalizeDiagonal, gamma);
       if (!result) continue;
 
-      const { beta, kappa } = result;
+      const { beta, kappa, EBIC: ebic } = result;
 
-      let nEdgesBeta = 0;
-      for (let j = 1; j <= d; j++) {
-        for (let k = 0; k < d; k++) {
-          if (!penalizeDiagonal && j - 1 === k) continue;
-          if (Math.abs(beta[j]![k]!) > 1e-10) nEdgesBeta++;
-        }
-      }
-
-      let nEdgesKappa = 0;
-      for (let i = 0; i < d; i++) {
-        for (let j = i + 1; j < d; j++) {
-          if (Math.abs(kappa[i]![j]!) > 1e-10) nEdgesKappa++;
-        }
-      }
-
-      const logDetK = logDet(kappa);
-      if (!isFinite(logDetK)) continue;
-
-      const S_R = _residualCov(X, Y, beta, nObs);
-      let trKS = 0;
-      for (let i = 0; i < d; i++) {
-        for (let j = 0; j < d; j++) {
-          trKS += kappa[i]![j]! * S_R[i]![j]!;
-        }
-      }
-
-      const totalEdges = nEdgesBeta + nEdgesKappa;
-      const logLik = (nObs / 2) * (logDetK - trKS);
-      const ebic = -2 * logLik
-        + Math.log(nObs) * totalEdges
-        + 4 * gamma * Math.log(2 * d) * totalEdges;
-
-      if (ebic < bestEBIC || (ebic === bestEBIC && totalEdges < (bestBeta ? _countEdges(bestBeta, bestKappa!, d, penalizeDiagonal) : Infinity))) {
+      if (ebic < bestEBIC || (ebic === bestEBIC && _countEdges(beta, kappa, d, penalizeDiagonal) < (bestBeta ? _countEdges(bestBeta, bestKappa!, d, penalizeDiagonal) : Infinity))) {
         bestEBIC = ebic;
         bestBeta = beta;
         bestKappa = kappa;
@@ -251,9 +219,10 @@ function _rothmana(
   lambda_kappa: number,
   d: number,
   penalizeDiagonal: boolean,
+  gamma: number,
   maxIter = 100,
   convergence = 1e-4,
-): { beta: number[][]; kappa: number[][] } | null {
+): { beta: number[][]; kappa: number[][]; EBIC: number } | null {
   const nObs = Y.length;
   const p = d + 1;
 
@@ -334,24 +303,60 @@ function _rothmana(
     if (betaDiff < convergence * betaRidgeNorm) break;
   }
 
-  // Refit
-  const S_R = _residualCov(X, Y, beta, nObs);
+  // ── Compute EBIC using unpenalized (refitted) likelihood
+  // R's Rothmana refits kappa with glasso(WS, rho=0, zero=ZeroIndex) for the
+  // likelihood calculation only, but returns the penalized kappa to the caller.
+  const WS = _residualCov(X, Y, beta, nObs);
+  const BIG = 1e10;
+  const zeroRho: number[][] = Array.from({ length: d }, (_, i) =>
+    Array.from({ length: d }, (__, j) => {
+      if (i === j) return 0;
+      return Math.abs(kappa[i]![j]!) < 1e-10 ? BIG : 0;
+    }),
+  );
+
+  let refitKappa: number[][] | null = null;
   try {
-    const { Theta } = runGlasso(S_R, 0, 100, 1e-6);
-    for (let i = 0; i < d; i++) {
-      for (let j = i + 1; j < d; j++) {
-        if (Math.abs(kappa[i]![j]!) < 1e-10) {
-          Theta[i]![j] = 0;
-          Theta[j]![i] = 0;
-        }
-      }
-    }
-    kappa = Theta;
+    const { Theta } = runGlasso(WS, zeroRho, 100, 1e-6);
+    refitKappa = Theta;
   } catch {
-    // Keep the penalized kappa
+    // Fall back to penalized kappa for likelihood
+  }
+  const kappaForLik = refitKappa ?? kappa;
+
+  const logDetK = logDet(kappaForLik);
+  if (!isFinite(logDetK)) return null;
+
+  let trKS = 0;
+  for (let i = 0; i < d; i++) {
+    for (let j = 0; j < d; j++) {
+      trKS += kappaForLik[i]![j]! * WS[i]![j]!;
+    }
   }
 
-  return { beta, kappa };
+  // Edge counts (from penalized kappa, matching R's pdB/pdO)
+  let nEdgesBeta = 0;
+  for (let j = 1; j <= d; j++) {
+    for (let k = 0; k < d; k++) {
+      if (lambdaMat[j]![k]! === 0) continue; // only count penalized entries
+      if (Math.abs(beta[j]![k]!) > 1e-10) nEdgesBeta++;
+    }
+  }
+  let nEdgesKappa = 0;
+  for (let i = 0; i < d; i++) {
+    for (let j = i + 1; j < d; j++) {
+      if (Math.abs(kappa[i]![j]!) > 1e-10) nEdgesKappa++;
+    }
+  }
+
+  const totalEdges = nEdgesBeta + nEdgesKappa;
+  const logLik = (nObs / 2) * (logDetK - trKS);
+  const EBIC = -2 * logLik
+    + Math.log(nObs) * totalEdges
+    + 4 * gamma * Math.log(2 * d) * totalEdges;
+
+  // Return penalized kappa (not refitted), matching R's behavior
+  return { beta, kappa, EBIC };
 }
 
 function _betaStep(

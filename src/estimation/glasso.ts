@@ -9,7 +9,7 @@
  */
 export function glassoCD(
   R: number[][],
-  rho: number,
+  rho: number | number[][],
   maxIterOuter: number,
   tolOuter: number,
   maxIterInner: number,
@@ -21,6 +21,7 @@ export function glassoCD(
 ): { W: number[][]; Beta: number[][] } {
   const p = R.length;
   const pp = p - 1;
+  const isMatrixRho = typeof rho !== 'number';
 
   const W: number[][] = initW
     ? (inPlace ? initW : initW.map(row => [...row]))
@@ -35,12 +36,16 @@ export function glassoCD(
   const s12 = new Float64Array(pp);
   const beta = new Float64Array(pp);
   const w12 = new Float64Array(pp);
+  // Index mapping: sub-index k → full-matrix index (for matrix rho lookup)
+  const idxMap = isMatrixRho ? new Int32Array(pp) : null;
+  // Per-entry rho values for current column (for matrix rho)
+  const rhoCol = isMatrixRho ? new Float64Array(pp) : null;
 
   for (let iter = 0; iter < maxIterOuter; iter++) {
     let maxDiff = 0;
 
     for (let j = 0; j < p; j++) {
-      // Fill W11, s12
+      // Fill W11, s12 and build index mapping
       let ri = 0;
       for (let a = 0; a < p; a++) {
         if (a === j) continue;
@@ -49,7 +54,16 @@ export function glassoCD(
           if (b !== j) { W11[ri * pp + ci] = W[a]![b]!; ci++; }
         }
         s12[ri] = R[a]![j]!;
+        if (idxMap) idxMap[ri] = a;
         ri++;
+      }
+
+      // Fill per-entry rho for this column
+      if (isMatrixRho && rhoCol && idxMap) {
+        const rhoMatrix = rho as number[][];
+        for (let k = 0; k < pp; k++) {
+          rhoCol[k] = rhoMatrix[j]![idxMap[k]!]!;
+        }
       }
 
       // Fill beta
@@ -71,7 +85,8 @@ export function glassoCD(
           if (wkk < 1e-12) {
             newBeta = 0;
           } else {
-            const st = partial > rho ? partial - rho : partial < -rho ? partial + rho : 0;
+            const r = isMatrixRho ? rhoCol![k]! : (rho as number);
+            const st = partial > r ? partial - r : partial < -r ? partial + r : 0;
             newBeta = st / wkk;
           }
           const diff = Math.abs(newBeta - beta[k]!);
@@ -146,7 +161,7 @@ export function buildTheta(W: number[][], Beta: number[][]): number[][] {
  */
 export function runGlasso(
   R: number[][],
-  rho: number,
+  rho: number | number[][],
   maxIterOuter = 100,
   tolOuter = 1e-4,
   maxIterInner = 200,
