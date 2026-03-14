@@ -75,6 +75,7 @@ export interface GraphicalVAROptions {
   scale?: boolean;
   centerWithin?: boolean;
   penalizeDiagonal?: boolean;
+  computeIndividual?: boolean;
 }
 
 export interface GraphicalVARResult {
@@ -91,6 +92,9 @@ export interface GraphicalVARResult {
   lambda_kappa: number;
   EBIC: number;
   formatted: string;
+  subjectIds?: string[];
+  perSubjectBetas?: Map<string, number[][]>;
+  perSubjectNObs?: Map<string, number>;
 }
 
 // ═══════════════════════════════════════════════════════════

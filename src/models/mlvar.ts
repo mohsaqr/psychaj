@@ -4,13 +4,14 @@
  * Produces three networks from EMA/ESM repeated-measures data:
  *   temporal        — directed (d×d), OLS fixed-effect VAR coefficients
  *   contemporaneous — undirected (d×d), EBIC-GLASSO on within-person OLS residuals
- *   between         — undirected (d×d), EBIC-GLASSO on person means
+ *   between         — undirected (d×d), GGM nodewise regression on person means (K = D(I-Γ))
  *
  * References: Epskamp et al. (2018) Psychological Methods.
  */
 
-import { multipleRegression } from 'carm';
+import { multipleRegression, runLMM } from 'carm';
 import { computePearsonMatrix } from '../core/pearson';
+import { jacobiEig } from '../core/partial-corr';
 import { ebicGlasso } from '../estimation/ebic-glasso';
 import { thetaToPcor } from '../estimation/theta-to-pcor';
 import { tDistCDF, tDistInv } from '../core/stats';
@@ -125,6 +126,60 @@ export function fitMlVAR(
     );
   }
 
+  // ── 4b. Compute R-style lagged person means for between-subjects centering.
+  // R's mlVAR expands beep gaps and computes lagged predictor person means
+  // over ALL non-NA lagged values (including positions from gap expansion).
+  // Each gap (beep_diff > 1) adds one extra lagged value: the observation
+  // right before the gap. We compute these means for _betweenGGM centering.
+  const _laggedSums = new Map<string, number[]>();
+  const _laggedCounts = new Map<string, number[]>();
+  const _initLagged = (id: string) => {
+    if (!_laggedSums.has(id)) {
+      _laggedSums.set(id, new Array(d).fill(0));
+      _laggedCounts.set(id, new Array(d).fill(0));
+    }
+  };
+  // Add all valid lag pair lagged values (raw / sd)
+  for (let t = 0; t < nObs; t++) {
+    const id = pairSubjectIds[t]!;
+    _initLagged(id);
+    const sums = _laggedSums.get(id)!;
+    const counts = _laggedCounts.get(id)!;
+    const pm = personMeans.get(id)!;
+    for (let j = 0; j < d; j++) {
+      // raw_lagged / sd = xCentered + personMean / sd
+      const rawOverSd = sds ? xCentered[t]![j]! + pm[j]! / sds[j]! : xCentered[t]![j]! + pm[j]!;
+      sums[j]! += rawOverSd;
+      counts[j]! += 1;
+    }
+  }
+  // Add extra lagged values from beep gaps within same (id, day)
+  for (let i = 1; i < sorted.length; i++) {
+    const curId = String(sorted[i]![idvar] ?? '');
+    const prevId = String(sorted[i - 1]![idvar] ?? '');
+    if (curId !== prevId) continue;
+    if (dayvar && Number(sorted[i]![dayvar] ?? 0) !== Number(sorted[i - 1]![dayvar] ?? 0)) continue;
+    const beepDiff = beepvar ? Number(sorted[i]![beepvar] ?? 0) - Number(sorted[i - 1]![beepvar] ?? 0) : 1;
+    if (beepDiff <= 1) continue; // Not a gap
+    // Gap of size beepDiff-1: the value at sorted[i-1] becomes an extra lagged value
+    _initLagged(curId);
+    const sums = _laggedSums.get(curId)!;
+    const counts = _laggedCounts.get(curId)!;
+    for (let j = 0; j < d; j++) {
+      const rawOverSd = sds
+        ? Number(sorted[i - 1]![vars[j]!] ?? 0) / sds[j]!
+        : Number(sorted[i - 1]![vars[j]!] ?? 0);
+      sums[j]! += rawOverSd;
+      counts[j]! += 1;
+    }
+  }
+  // Compute means
+  const personLaggedMeans = new Map<string, number[]>();
+  for (const [id, sums] of _laggedSums) {
+    const counts = _laggedCounts.get(id)!;
+    personLaggedMeans.set(id, sums.map((s, j) => counts[j]! > 0 ? s / counts[j]! : 0));
+  }
+
   // ── 5. Within-estimator OLS per outcome variable
   const dfOLS     = nObs - d - 1;
   const dfCorrect = nObs - d - nSubjects;
@@ -188,15 +243,18 @@ export function fitMlVAR(
     contemporaneous = _zeroMatrix(d);
   }
 
-  // ── 7. Between-subjects network
+  // ── 7. Between-subjects network (GGM nodewise regression)
+  //   Two-step multilevel VAR (Epskamp et al. 2017, Eq. 3): K = D(I - Γ)
+  //   For each outcome Y_k, regress non-centered Y on within-centered lagged
+  //   predictors + standardized person means of all other variables.
+  //   Γ[k][j] = fixed-effect coefficient of personMean_j in model for Y_k.
+  //   D = diag(1/mu_SD²) from random intercept variance decomposition.
   let between: number[][];
   if (nSubjects < Math.max(d + 1, 3)) {
     between = _zeroMatrix(d);
   } else {
     try {
-      const R = computePearsonMatrix(betweenMat);
-      const { Theta } = ebicGlasso(R, nSubjects, gamma);
-      between = thetaToPcor(Theta);
+      between = _betweenGGM(d, nObs, pairSubjectIds, xCentered, yCentered, personMeans, sds, personLaggedMeans);
     } catch {
       between = _zeroMatrix(d);
     }
@@ -305,6 +363,131 @@ export function computeImpulseResponse(
 
 function _zeroMatrix(d: number): number[][] {
   return Array.from({ length: d }, () => new Array(d).fill(0));
+}
+
+/**
+ * Between-subjects GGM via nodewise regression (Epskamp et al. 2017, Eq. 3).
+ * Matches R's mlVAR two-step estimation: K = D(I - Γ).
+ * Uses REML (carm's runLMM) for each outcome variable:
+ *   Y_k ~ [within-centered lagged] + [person means of other vars] + (1|id)
+ */
+function _betweenGGM(
+  d: number,
+  nObs: number,
+  pairSubjectIds: string[],
+  xCentered: number[][],
+  yCentered: number[][],
+  personMeans: Map<string, number[]>,
+  sds: number[] | null,
+  personLaggedMeans: Map<string, number[]>,
+): number[][] {
+  const Gamma: number[][] = Array.from({ length: d }, () => new Array(d).fill(0));
+  const muSD: number[] = new Array(d).fill(1);
+
+  // Standardized person means (personMean / sd for each variable)
+  const pmStd = new Map<string, number[]>();
+  for (const [id, mean] of personMeans) {
+    pmStd.set(id, sds ? mean.map((m, j) => m / sds[j]!) : [...mean]);
+  }
+
+  for (let k = 0; k < d; k++) {
+    // Outcome: non-centered standardized Y (= yCentered + personMeanStd)
+    const yRaw: number[] = new Array(nObs);
+    for (let t = 0; t < nObs; t++) {
+      const pm = pmStd.get(pairSubjectIds[t]!)!;
+      yRaw[t] = yCentered[t]![k]! + pm[k]!;
+    }
+
+    // Build fixed predictors for runLMM
+    const fixedPredictors: Record<string, number[]> = {};
+
+    // d within-centered lagged predictors.
+    // R centers by the mean of ALL lagged values (including gap-expansion positions).
+    // xCentered[t][j] + pmStd[j] = raw_lagged / sd. Subtract R-style lagged mean.
+    for (let j = 0; j < d; j++) {
+      fixedPredictors[`w${j}`] = xCentered.map((r, t) => {
+        const id = pairSubjectIds[t]!;
+        const pm = pmStd.get(id)!;
+        const rawOverSd = r[j]! + pm[j]!; // raw_lagged / sd
+        return rawOverSd - personLaggedMeans.get(id)![j]!;
+      });
+    }
+
+    // (d-1) between-subject predictors: person means of vars ≠ k
+    const betweenIdx: number[] = [];
+    for (let j = 0; j < d; j++) {
+      if (j === k) continue;
+      betweenIdx.push(j);
+      fixedPredictors[`b${j}`] = pairSubjectIds.map(id => pmStd.get(id)![j]!);
+    }
+
+    try {
+      const lmm = runLMM({
+        outcome: yRaw,
+        fixedPredictors,
+        groupId: pairSubjectIds,
+        method: 'ML',
+      });
+
+      // Extract between coefficients from fixed effects
+      for (let idx = 0; idx < betweenIdx.length; idx++) {
+        const j = betweenIdx[idx]!;
+        const fe = lmm.fixedEffects.find(f => f.name === `b${j}`);
+        if (fe) Gamma[k]![j] = fe.estimate;
+      }
+
+      // Random intercept SD (keep zero if variance is zero — triggers zero-network)
+      muSD[k] = Math.sqrt(Math.max(lmm.varianceComponents.intercept, 0));
+    } catch {
+      muSD[k] = 1e-5;
+    }
+  }
+
+  // R returns zero between network when any mu_SD is zero
+  if (muSD.some(v => v < 1e-8)) return Array.from({ length: d }, () => new Array(d).fill(0));
+
+  // Build Kappa = D * (I - Gamma), D = diag(1/muSD²)
+  const Kappa: number[][] = Array.from({ length: d }, (_, i) =>
+    Array.from({ length: d }, (_, j) => {
+      const ig = (i === j ? 1 : 0) - Gamma[i]![j]!;
+      return ig / (muSD[i]! * muSD[i]!);
+    }),
+  );
+
+  // Symmetrize
+  for (let i = 0; i < d; i++) {
+    for (let j = i + 1; j < d; j++) {
+      const avg = (Kappa[i]![j]! + Kappa[j]![i]!) / 2;
+      Kappa[i]![j] = avg;
+      Kappa[j]![i] = avg;
+    }
+  }
+
+  // Force positive definite — matches R's forcePositive():
+  // adds |min_eigenvalue| + 0.001 to the diagonal
+  const KappaPD = _forcePositiveDefinite(Kappa);
+
+  // Partial correlations from precision matrix (Eq. 2)
+  return thetaToPcor(KappaPD);
+}
+
+/**
+ * Force a symmetric matrix to be positive definite by adding
+ * |min_eigenvalue| + 0.001 to the diagonal. Matches R's forcePositive().
+ */
+function _forcePositiveDefinite(M: number[][]): number[][] {
+  const n = M.length;
+  const { values } = jacobiEig(M);
+
+  const minVal = Math.min(...values);
+  if (minVal > 0) return M;
+
+  // Add |min_eigenvalue| + 0.001 to each diagonal element
+  const shift = -minVal + 0.001;
+  const result: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => M[i]![j]! + (i === j ? shift : 0)),
+  );
+  return result;
 }
 
 function _spectralRadius(temporal: number[][]): number {

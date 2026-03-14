@@ -9,6 +9,7 @@ import { invertSymmetric, logDet } from '../core/linalg';
 import type { GraphicalVAROptions, GraphicalVARResult } from '../core/types';
 import { computePDC } from './pdc';
 import { computePCC } from './pcc';
+import { multipleRegression } from 'carm';
 
 export function fitGraphicalVAR(
   rows: Record<string, string | number>[],
@@ -22,6 +23,7 @@ export function fitGraphicalVAR(
     scale = true,
     centerWithin = true,
     penalizeDiagonal = true,
+    computeIndividual = false,
   } = opts;
   const d = vars.length;
 
@@ -106,6 +108,7 @@ export function fitGraphicalVAR(
   // ── 6. Build lag pairs
   const yRows: number[][] = [];
   const xRows: number[][] = [];
+  const pairSubjectIds: string[] = [];
 
   for (let i = lag; i < sorted.length; i++) {
     const cur = sorted[i]!;
@@ -124,6 +127,7 @@ export function fitGraphicalVAR(
 
     yRows.push(scaled[i]!);
     xRows.push([1, ...scaled[i - lag]!]);
+    pairSubjectIds.push(curId);
   }
 
   const nObs = yRows.length;
@@ -180,6 +184,55 @@ export function fitGraphicalVAR(
   const PDC = computePDC(temporal, bestKappa);
   const PCC = computePCC(bestKappa);
 
+  // ── 10. Per-subject temporal Betas (optional)
+  let subjectIdsOut: string[] | undefined;
+  let perSubjectBetas: Map<string, number[][]> | undefined;
+  let perSubjectNObs: Map<string, number> | undefined;
+
+  if (computeIndividual) {
+    subjectIdsOut = [];
+    perSubjectBetas = new Map();
+    perSubjectNObs = new Map();
+
+    const subjPairIdx = new Map<string, number[]>();
+    for (let t = 0; t < pairSubjectIds.length; t++) {
+      const id = pairSubjectIds[t]!;
+      if (!subjPairIdx.has(id)) subjPairIdx.set(id, []);
+      subjPairIdx.get(id)!.push(t);
+    }
+
+    // xRows has intercept prepended ([1, x1, x2, ...]); extract predictor columns only
+    for (const [id, idxs] of subjPairIdx) {
+      subjectIdsOut.push(id);
+      const n = idxs.length;
+      perSubjectNObs.set(id, n);
+
+      if (n < d + 2) {
+        perSubjectBetas.set(id, _zeroMatrix(d));
+        continue;
+      }
+
+      // Extract this subject's x (without intercept) and y rows
+      const sx = idxs.map(i => xRows[i]!.slice(1));
+      const sy = idxs.map(i => yRows[i]!);
+      const sBeta = _zeroMatrix(d);
+      const sPreds = vars.map((v, j) => ({ name: v, values: sx.map(r => r[j]!) }));
+
+      for (let k = 0; k < d; k++) {
+        const outcome = sy.map(r => r[k]!);
+        try {
+          const reg = multipleRegression(outcome, sPreds);
+          for (let j = 0; j < d; j++) {
+            sBeta[j]![k] = reg.coefficients[j + 1]!.estimate;
+          }
+        } catch {
+          // Degenerate: keep zeros
+        }
+      }
+      perSubjectBetas.set(id, sBeta);
+    }
+  }
+
   const formatted = [
     'graphicalVAR',
     `d=${d}`,
@@ -205,6 +258,9 @@ export function fitGraphicalVAR(
     lambda_kappa: bestLK,
     EBIC: bestEBIC,
     formatted,
+    subjectIds: subjectIdsOut,
+    perSubjectBetas,
+    perSubjectNObs,
   };
 }
 
@@ -589,4 +645,8 @@ function _countEdges(beta: number[][], kappa: number[][], d: number, penalizeDia
     }
   }
   return count;
+}
+
+function _zeroMatrix(d: number): number[][] {
+  return Array.from({ length: d }, () => new Array(d).fill(0));
 }
